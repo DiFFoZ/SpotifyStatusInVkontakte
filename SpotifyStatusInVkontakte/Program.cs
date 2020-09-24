@@ -36,7 +36,7 @@ namespace SpotifyStatusInVkontakte
         private static ulong _SteamId;
         private static string _SteamToken;
 
-        private static VkApi _VKAPI;
+        private static readonly VkApi _VKAPI;
         private static SpotifyWebAPI _SpotifyAPI;
         private static readonly SteamUser _SteamAPI;
 
@@ -63,6 +63,7 @@ namespace SpotifyStatusInVkontakte
                 "http://localhost:4002",
                 Scope.UserReadCurrentlyPlaying | Scope.UserReadPlaybackState
             );
+            _VKAPI = new VkApi(new ServiceCollection().AddAudioBypass());
             Log.Logger = new LoggerConfiguration()
                 .MinimumLevel.Is(_Configuration.GetSection("Log").Get<LogEventLevel>())
                 .WriteTo.Console()
@@ -181,7 +182,6 @@ namespace SpotifyStatusInVkontakte
 
         private static async Task AuthVK()
         {
-            _VKAPI = new VkApi(new ServiceCollection().AddAudioBypass());
             await _VKAPI.AuthorizeAsync(new ApiAuthParams
             {
                 Settings = Settings.Status,
