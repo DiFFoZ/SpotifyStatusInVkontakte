@@ -29,8 +29,6 @@ namespace SpotifyStatusInVkontakte
         private static readonly IStringLocalizer _StringLocalizer;
 
         private static string _VKToken;
-        private static string _VKLogin;
-        private static string _VKPassword;
 
         private static string _SpotifyClientId;
         private static string _SpotifyClientSecret;
@@ -79,8 +77,6 @@ namespace SpotifyStatusInVkontakte
         private static void Configurate()
         {
             _VKToken = _Configuration["VkToken"];
-            _VKLogin = _Configuration["VkLogin"];
-            _VKPassword = _Configuration["VkPassword"];
             _SpotifyClientId = _Configuration["SpotifyClientId"];
             _SpotifyClientSecret = _Configuration["SpotifySecretClientId"];
             _SteamId = _Configuration.GetSection("SteamId").Get<ulong>();
@@ -90,6 +86,11 @@ namespace SpotifyStatusInVkontakte
 
         private static async Task Main(string[] args)
         {
+            if(_VKToken.Equals("your_vk_token", StringComparison.OrdinalIgnoreCase))
+            {
+                Log.Information("Enter all information into appsettings.json");
+                return;
+            }
             AppDomain.CurrentDomain.ProcessExit += CurrentDomain_ProcessExit;
             await AuthVK();
             AuthSpotify();
@@ -183,12 +184,8 @@ namespace SpotifyStatusInVkontakte
             _VKAPI = new VkApi(new ServiceCollection().AddAudioBypass());
             await _VKAPI.AuthorizeAsync(new ApiAuthParams
             {
-                ApplicationId = 7186653,
-                Settings = Settings.All,
+                Settings = Settings.Status,
                 AccessToken = _VKToken,
-                Login = _VKLogin,
-                Password = _VKPassword,
-                TwoFactorSupported = false
             });
         }
 
