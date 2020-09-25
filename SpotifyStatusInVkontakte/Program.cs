@@ -133,9 +133,9 @@ namespace SpotifyStatusInVkontakte
             if (_SpotifyToken.IsExpired())
             {
                 Log.Debug("Spotify token expired.. Creating new");
-                _SpotifyToken = await _SpotifyAuth.RefreshToken(_SpotifyToken.RefreshToken);
-                _SpotifyAPI.AccessToken = _SpotifyToken.AccessToken;
-                _SpotifyAPI.TokenType = _SpotifyToken.TokenType;
+                var token = await _SpotifyAuth.RefreshToken(_SpotifyToken.RefreshToken);
+                _SpotifyAPI.AccessToken = token.AccessToken;
+                _SpotifyAPI.TokenType = token.TokenType;
             }
             var playbackContext = await _SpotifyAPI.GetPlaybackAsync();
             var summary = await _SteamAPI.GetPlayerSummaryAsync(_SteamId);
