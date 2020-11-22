@@ -20,6 +20,7 @@ using VkNet;
 using VkNet.AudioBypassService.Extensions;
 using VkNet.Enums.Filters;
 using VkNet.Model;
+using VkNet.Model.RequestParams;
 
 namespace SpotifyStatusInVkontakte
 {
@@ -28,7 +29,8 @@ namespace SpotifyStatusInVkontakte
         private static readonly IConfigurationRoot _Configuration;
         private static readonly IStringLocalizer _StringLocalizer;
 
-        private static string _VKToken;
+        private static string _VKLogin;
+        private static string _VKPassword;
 
         private static string _SpotifyClientId;
         private static string _SpotifyClientSecret;
@@ -46,6 +48,7 @@ namespace SpotifyStatusInVkontakte
         private static bool _IsQuitting;
         private static bool _SpotifyConnected;
         private static string _VKStatus;
+        private static string _VKAudioId;
         private static int _Delay;
 
         static Program()
@@ -56,6 +59,7 @@ namespace SpotifyStatusInVkontakte
                 .AddJsonFile("appsettings.json")
                 .Build();
             Configurate();
+
             _SpotifyAuth = new AuthorizationCodeAuth(
                 _SpotifyClientId,
                 _SpotifyClientSecret,
@@ -64,12 +68,15 @@ namespace SpotifyStatusInVkontakte
                 Scope.UserReadCurrentlyPlaying | Scope.UserReadPlaybackState
             );
             _VKAPI = new VkApi(new ServiceCollection().AddAudioBypass());
+
             Log.Logger = new LoggerConfiguration()
                 .MinimumLevel.Is(_Configuration.GetSection("Log").Get<LogEventLevel>())
                 .WriteTo.Console()
                 .CreateLogger();
+
             var steamWebInterfaceFactory = new SteamWebInterfaceFactory(_SteamToken);
             _SteamAPI = steamWebInterfaceFactory.CreateSteamWebInterface<SteamUser>();
+
             var loggerFactory = new LoggerFactory().AddSerilog();
             _StringLocalizer = new JsonStringLocalizer(Path.Combine(Directory.GetCurrentDirectory(), "Resources"),
                 "test", loggerFactory.CreateLogger("test"));
@@ -77,7 +84,8 @@ namespace SpotifyStatusInVkontakte
 
         private static void Configurate()
         {
-            _VKToken = _Configuration["VkToken"];
+            _VKLogin = _Configuration["VkLogin"];
+            _VKPassword = _Configuration["VkPassword"];
             _SpotifyClientId = _Configuration["SpotifyClientId"];
             _SpotifyClientSecret = _Configuration["SpotifySecretClientId"];
             _SteamId = _Configuration.GetSection("SteamId").Get<ulong>();
@@ -87,9 +95,10 @@ namespace SpotifyStatusInVkontakte
 
         private static async Task Main(string[] args)
         {
-            if(_VKToken.Equals("your_vk_token", StringComparison.OrdinalIgnoreCase))
+            if (string.IsNullOrEmpty(_VKLogin))
             {
                 Log.Information("Enter all information into appsettings.json");
+                await Task.Delay(3000);
                 return;
             }
             AppDomain.CurrentDomain.ProcessExit += CurrentDomain_ProcessExit;
@@ -134,18 +143,53 @@ namespace SpotifyStatusInVkontakte
             {
                 Log.Debug("Spotify token expired.. Creating new");
                 var token = await _SpotifyAuth.RefreshToken(_SpotifyToken.RefreshToken);
+                _SpotifyToken = token;
                 _SpotifyAPI.AccessToken = token.AccessToken;
                 _SpotifyAPI.TokenType = token.TokenType;
             }
             var playbackContext = await _SpotifyAPI.GetPlaybackAsync();
             var summary = await _SteamAPI.GetPlayerSummaryAsync(_SteamId);
 
+            // Spotify music is playing?
             var b = playbackContext != null && (playbackContext?.IsPlaying ?? false) && playbackContext.Item != null;
+
+            if(b)
+            {
+                var audios = await _VKAPI.Audio.SearchAsync(new AudioSearchParams
+                {
+                    SearchOwn = false,
+                    PerformerOnly = false,
+                    Count = 1,
+                    Query = $"{GetArtists(playbackContext.Item.Artists)} {playbackContext.Item.Name}"
+                });
+
+                if (audios?.Any() == true)
+                {
+                    var audio = audios[0];
+                    var audioId = $"{audio.OwnerId}_{audio.Id}";
+                    if (_VKAudioId == audioId)
+                    {
+                        Log.Debug("Old VkAudio is equals to new.. Skipping");
+                        return;
+                    }
+                    _VKAudioId = audioId;
+                    await _VKAPI.Audio.SetBroadcastAsync(audioId);
+                    return;
+                }
+            }
+            if (!string.IsNullOrEmpty(_VKAudioId))
+            {
+                Log.Debug("Set not listening");
+                _VKAudioId = string.Empty;
+                await _VKAPI.Audio.SetBroadcastAsync();
+            }
+
+            // Steam playing game
             var b2 = summary.Data?.PlayingGameName;
+            // Steam user is online
             var b3 = summary.Data?.UserStatus == Steam.Models.SteamCommunity.UserStatus.Online;
             var status = string.Concat(
-                b ? _StringLocalizer["Spotify", new object[] { GetArtists(playbackContext.Item.Artists), playbackContext.Item.Name, GetTime(playbackContext.Item.DurationMs, playbackContext.ProgressMs) }]
-                    : _StringLocalizer["SpotifyNothing"],
+                _StringLocalizer["SpotifyNothing"],
                 _StringLocalizer["Steam", new object[] { string.IsNullOrEmpty(b2) ? b3 ? "в онлайне" : "в оффлайне" : b2 }],
                 !(b || !string.IsNullOrEmpty(b2)) ? _StringLocalizer["AFK"] : string.Empty);
 
@@ -184,8 +228,17 @@ namespace SpotifyStatusInVkontakte
         {
             await _VKAPI.AuthorizeAsync(new ApiAuthParams
             {
-                Settings = Settings.Status,
-                AccessToken = _VKToken,
+                Settings = Settings.Audio,
+                Password = _VKPassword,
+                Login = _VKLogin,
+                TwoFactorSupported = true,
+                TokenExpireTime = 0,
+                ForceSms = true,
+                TwoFactorAuthorization = () =>
+                {
+                    Log.Information("Enter 2FA code");
+                    return Console.ReadLine();
+                }
             });
         }
 
