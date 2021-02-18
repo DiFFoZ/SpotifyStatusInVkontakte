@@ -3,6 +3,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Localization;
 using Microsoft.Extensions.Logging;
+using NickBuhro.Translit;
 using Serilog;
 using Serilog.Events;
 using SpotifyAPI.Web;
@@ -21,7 +22,6 @@ using VkNet;
 using VkNet.AudioBypassService.Extensions;
 using VkNet.Enums.Filters;
 using VkNet.Model;
-using VkNet.Model.RequestParams;
 
 namespace SpotifyStatusInVkontakte
 {
@@ -164,7 +164,7 @@ namespace SpotifyStatusInVkontakte
 
             if (isPlayingSpotify)
             {
-                var audios = await s_VKAPI.Audio.SearchAsync(new AudioSearchParams
+                var audios = await s_VKAPI.Audio.SearchAsync(new()
                 {
                     SearchOwn = false,
                     PerformerOnly = false,
@@ -172,20 +172,39 @@ namespace SpotifyStatusInVkontakte
                     Query = $"{Extensions.GetArtists(playbackContext.Item.Artists)} {playbackContext.Item.Name}"
                 });
 
-                if (audios?.Any() == true)
+                string vkFullAudio;
+                if (audios?.Any() == false)
+                {
+                    Log.Debug("Didn't found a music in VK");
+                    Log.Debug("Trying translit to russian");
+
+                    audios = await s_VKAPI.Audio.SearchAsync(new()
+                    {
+                        SearchOwn = false,
+                        PerformerOnly = false,
+                        Count = 1,
+                        Query = $"{Transliteration.LatinToCyrillic(Extensions.GetArtists(playbackContext.Item.Artists))} {playbackContext.Item.Name}"
+                    });
+                    var audio = audios.FirstOrDefault();
+                    vkFullAudio = audio is not null ? $"{audio.OwnerId}_{audio.Id}" : string.Empty;
+                }
+                else
                 {
                     var audio = audios[0];
-                    var audioId = $"{audio.OwnerId}_{audio.Id}";
+                    vkFullAudio = $"{audio.OwnerId}_{audio.Id}";
+                }
 
-                    Log.Debug($"Found music in VK {audio.Title}({audioId})");
+                if (!string.IsNullOrEmpty(vkFullAudio))
+                {
+                    Log.Debug($"Found music in VK {vkFullAudio}");
 
-                    if (s_VKAudioId == audioId)
+                    if (s_VKAudioId == vkFullAudio)
                     {
                         Log.Debug("Old VkAudio is equals to new.. Skipping");
                         return;
                     }
-                    s_VKAudioId = audioId;
-                    await s_VKAPI.Audio.SetBroadcastAsync(audioId);
+                    s_VKAudioId = vkFullAudio;
+                    await s_VKAPI.Audio.SetBroadcastAsync(vkFullAudio);
                     return;
                 }
 
